@@ -31,6 +31,7 @@
 #define THIRD_PARTY_RNNOISE_SRC_KISS_FFT_H_
 
 #include <array>
+#include <cstdint>
 #include <complex>
 #include <vector>
 
