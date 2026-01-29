@@ -107,22 +107,22 @@ def get_long_description():
 
 
 setup(
-    name='pytgvoip',
-    version=get_version(),
+    name='stefano-pytgvoip',
+    version="0.0.7.1.post1",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
     description='Telegram VoIP Library for Python',
     long_description=get_long_description(),
     long_description_content_type='text/markdown',
-    url='https://github.com/bakatrouble/pytgvoip',
+    url='https://github.com/Sanji78/telegram_voip',
     keywords='telegram messenger voip library python',
     project_urls={
         'Tracker': 'https://github.com/bakatrouble/pytgvoip/issues',
         'Community': 'https:/t.me/pytgvoip',
         'Source': 'https://github.com/bakatrouble/pytgvoip',
     },
-    python_required='~=3.5',
+    python_requires='>=3.8',
     ext_modules=[CMakeExtension('_tgvoip')],
     packages=['tgvoip'],
     package_dir={'tgvoip': 'src/tgvoip'},
