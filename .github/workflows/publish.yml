@@ -1,0 +1,69 @@
+name: Build and publish wheels (musllinux cp313)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build_wheels:
+    name: Build wheels (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install cibuildwheel
+        run: python -m pip install --upgrade pip cibuildwheel==2.21.0
+
+      - name: Build wheels
+        env:
+          CIBW_BUILD: "cp313-musllinux_${{ matrix.arch }}"
+          CIBW_ARCHS_LINUX: "${{ matrix.arch }}"
+
+          # Install native deps inside the musllinux build container
+          CIBW_BEFORE_ALL_LINUX: >
+            apk add --no-cache
+            cmake
+            ninja
+            build-base
+            linux-headers
+            python3-dev
+            openssl-dev
+            opus-dev
+
+          # Don't run tests in wheel build (emulation is slow/flaky)
+          CIBW_TEST_SKIP: "*"
+        run: cibuildwheel --output-dir wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+
+  publish:
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
