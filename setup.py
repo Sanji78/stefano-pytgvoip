@@ -68,20 +68,35 @@ class CMakeBuild(build_ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
         #cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
         #              '-DPYTHON_EXECUTABLE=' + sys.executable]
+
         python_exe = sys.executable
         python_root = os.path.dirname(os.path.dirname(python_exe))
-        
-        # Force CMake FindPython3 to use the SAME Python that is building the wheel (cibuildwheel cp313),
-        # including headers and libpython (otherwise it may pick system 3.11 dev files).
         python_include = sysconfig.get_path("include")
         python_libdir = sysconfig.get_config_var("LIBDIR")
-        python_ldlibrary = sysconfig.get_config_var("LDLIBRARY")
-        python_library = (
-            os.path.join(python_libdir, python_ldlibrary)
-            if python_libdir and python_ldlibrary
-            else ""
-        )
         
+        ldlibrary = sysconfig.get_config_var("LDLIBRARY")          # e.g. libpython3.13.so or .a
+        instsoname = sysconfig.get_config_var("INSTSONAME")        # e.g. libpython3.13.so.1.0 (often better)
+        library = ""
+        
+        candidates = []
+        if python_libdir and instsoname:
+            candidates.append(os.path.join(python_libdir, instsoname))
+        if python_libdir and ldlibrary:
+            candidates.append(os.path.join(python_libdir, ldlibrary))
+        
+        # Fallbacks commonly present in manylinux/musllinux python installs
+        if python_root:
+            candidates.append(os.path.join(python_root, "lib", "libpython3.13.so.1.0"))
+            candidates.append(os.path.join(python_root, "lib", "libpython3.13.so"))
+            candidates.append(os.path.join(python_root, "lib", "libpython3.13.a"))
+        
+        for c in candidates:
+            if c and os.path.exists(c):
+                library = c
+                break
+        
+        python_library = library
+
         cmake_args = [
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
         
@@ -99,7 +114,7 @@ class CMakeBuild(build_ext):
             cmake_args.append(f"-DPython3_INCLUDE_DIR={python_include}")
             cmake_args.append(f"-DPython3_INCLUDE_DIRS={python_include}")
         
-        if python_library and os.path.exists(python_library):
+        if python_library:
             cmake_args.append(f"-DPython3_LIBRARY={python_library}")
             cmake_args.append(f"-DPython3_LIBRARIES={python_library}")
         
@@ -149,7 +164,7 @@ def get_long_description():
 
 setup(
     name='stefano-pytgvoip',
-    version="0.0.7.6",
+    version="0.0.7.7",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
