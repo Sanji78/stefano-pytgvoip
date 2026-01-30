@@ -65,8 +65,23 @@ class CMakeBuild(build_ext):
 
     def build_extension(self, ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
-        cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
-                      '-DPYTHON_EXECUTABLE=' + sys.executable]
+        #cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
+        #              '-DPYTHON_EXECUTABLE=' + sys.executable]
+
+        python_exe = sys.executable
+        python_root = os.path.dirname(os.path.dirname(python_exe))
+
+        cmake_args = [
+            '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
+
+            # For old FindPython(Interp) usage (kept for compatibility)
+            f'-DPYTHON_EXECUTABLE={python_exe}',
+
+            # What CMake FindPython3 actually respects
+            f'-DPython3_EXECUTABLE={python_exe}',
+            f'-DPython3_ROOT_DIR={python_root}',
+            '-DPython3_FIND_STRATEGY=LOCATION',
+        ]
 
         cfg = 'Release'
         build_args = ['--config', cfg, '--target', '_tgvoip']
@@ -108,7 +123,7 @@ def get_long_description():
 
 setup(
     name='stefano-pytgvoip',
-    version="0.0.7.4",
+    version="0.0.7.5",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
