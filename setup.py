@@ -34,23 +34,22 @@ class CMakeExtension(Extension):
 def _find_existing_libpython(python_root: str) -> str:
     """
     Try to locate an existing shared libpython for the running interpreter.
+    Only returns a path if it EXISTS.
     """
     ver = f"{sys.version_info.major}.{sys.version_info.minor}"
     candidates = [
-        # Common locations in python installs
         os.path.join(python_root, "lib", f"libpython{ver}.so.1.0"),
         os.path.join(python_root, "lib", f"libpython{ver}.so"),
-        # Sometimes in /usr/local/lib or LIBDIR
         os.path.join(sysconfig.get_config_var("LIBDIR") or "", sysconfig.get_config_var("INSTSONAME") or ""),
         os.path.join(sysconfig.get_config_var("LIBDIR") or "", sysconfig.get_config_var("LDLIBRARY") or ""),
     ]
+
     for c in candidates:
-        if c and os.path.exists(c) and c.endswith(".so") or c.endswith(".so.1.0"):
+        if not c:
+            continue
+        if os.path.exists(c) and (c.endswith(".so") or c.endswith(".so.1.0") or ".so." in os.path.basename(c)):
             return c
-    # Allow .so.1.0 even if endswith check above is too strict
-    for c in candidates:
-        if c and os.path.exists(c) and ".so" in os.path.basename(c):
-            return c
+
     return ""
 
 
@@ -60,7 +59,7 @@ def _find_static_libpython_fallback() -> str:
     """
     ver = f"{sys.version_info.major}.{sys.version_info.minor}"
     candidates = []
-
+    candidates.append("/opt/_internal/cpython-3.13.0rc2/lib/libpython3.13.a")
     # sysconfig-derived (may point to .a)
     libdir = sysconfig.get_config_var("LIBDIR") or ""
     ldlibrary = sysconfig.get_config_var("LDLIBRARY") or ""
@@ -159,6 +158,8 @@ class CMakeBuild(build_ext):
                 f'-DPython3_INCLUDE_DIRS={python_include}',
             ]
 
+        if not os.path.exists(libpython):
+            raise RuntimeError(f"Bundled libpython path does not exist: {libpython}")
         # Tell CMake to link against our bundled libpython
         cmake_args += [f'-DBUNDLED_PYTHON_LIBRARY={libpython}']
 
@@ -215,7 +216,7 @@ def get_long_description():
 
 setup(
     name='stefano-pytgvoip',
-    version="0.0.7.8",
+    version="0.0.7.9",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
