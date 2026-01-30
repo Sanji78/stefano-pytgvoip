@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
 
-# PytgVoIP - Telegram VoIP Library for Python
-# Copyright (C) 2020 bakatrouble <https://github.com/bakatrouble>
-#
-# This file is part of PytgVoIP.
-#
-# PytgVoIP is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published
-# by the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# PytgVoIP is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with PytgVoIP.  If not, see <http://www.gnu.org/licenses/>.
-
-
 import multiprocessing
 import os
 import re
@@ -46,14 +27,92 @@ def check_libraries():
 
 class CMakeExtension(Extension):
     def __init__(self, name, sourcedir=''):
-        Extension.__init__(self, name, sources=[])
+        super().__init__(name, sources=[])
         self.sourcedir = os.path.abspath(sourcedir)
+
+
+def _find_existing_libpython(python_root: str) -> str:
+    """
+    Try to locate an existing shared libpython for the running interpreter.
+    """
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    candidates = [
+        # Common locations in python installs
+        os.path.join(python_root, "lib", f"libpython{ver}.so.1.0"),
+        os.path.join(python_root, "lib", f"libpython{ver}.so"),
+        # Sometimes in /usr/local/lib or LIBDIR
+        os.path.join(sysconfig.get_config_var("LIBDIR") or "", sysconfig.get_config_var("INSTSONAME") or ""),
+        os.path.join(sysconfig.get_config_var("LIBDIR") or "", sysconfig.get_config_var("LDLIBRARY") or ""),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c) and c.endswith(".so") or c.endswith(".so.1.0"):
+            return c
+    # Allow .so.1.0 even if endswith check above is too strict
+    for c in candidates:
+        if c and os.path.exists(c) and ".so" in os.path.basename(c):
+            return c
+    return ""
+
+
+def _find_static_libpython_fallback() -> str:
+    """
+    Locate a static libpython archive if present (cibuildwheel often has one in internal paths).
+    """
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    candidates = []
+
+    # sysconfig-derived (may point to .a)
+    libdir = sysconfig.get_config_var("LIBDIR") or ""
+    ldlibrary = sysconfig.get_config_var("LDLIBRARY") or ""
+    if libdir and ldlibrary and ldlibrary.endswith(".a"):
+        candidates.append(os.path.join(libdir, ldlibrary))
+
+    # Common internal cibuildwheel locations (best-effort)
+    candidates += [
+        f"/opt/_internal/cpython-{sysconfig.get_config_var('py_version_nodot') or ''}/lib/libpython{ver}.a",
+        f"/opt/_internal/cpython-{sys.version.split()[0]}/lib/libpython{ver}.a",
+    ]
+
+    # Broad fallback search (only within /opt to keep it fast-ish)
+    for root in ["/opt/_internal", "/opt/python"]:
+        if os.path.isdir(root):
+            for dirpath, _, filenames in os.walk(root):
+                for fn in filenames:
+                    if fn == f"libpython{ver}.a":
+                        candidates.append(os.path.join(dirpath, fn))
+
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return ""
+
+
+def _build_shared_libpython_from_static(static_a: str, out_dir: str) -> str:
+    """
+    Build a shared libpython from a static libpython archive.
+    This is used to produce a self-contained wheel for musl where runtime symbol resolution needs libpython.
+    """
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    out_so = os.path.join(out_dir, f"libpython{ver}.so.1.0")
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Attempt to create a shared library from the static archive.
+    # This is not "pretty" but works in many CI images.
+    cmd = [
+        "gcc", "-shared", "-Wl,-soname," + os.path.basename(out_so),
+        "-o", out_so,
+        "-Wl,--whole-archive", static_a, "-Wl,--no-whole-archive",
+        "-ldl", "-lpthread", "-lm"
+    ]
+    subprocess.check_call(cmd)
+    return out_so
 
 
 class CMakeBuild(build_ext):
     def run(self):
         try:
-            out = subprocess.check_output(['cmake', '--version'])
+            subprocess.check_output(['cmake', '--version'])
         except OSError:
             raise RuntimeError("CMake must be installed to build the following extensions: " +
                                ", ".join(e.name for e in self.extensions))
@@ -66,86 +125,78 @@ class CMakeBuild(build_ext):
 
     def build_extension(self, ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
-        #cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
-        #              '-DPYTHON_EXECUTABLE=' + sys.executable]
 
         python_exe = sys.executable
         python_root = os.path.dirname(os.path.dirname(python_exe))
-        python_include = sysconfig.get_path("include")
-        python_libdir = sysconfig.get_config_var("LIBDIR")
-        
-        ldlibrary = sysconfig.get_config_var("LDLIBRARY")          # e.g. libpython3.13.so or .a
-        instsoname = sysconfig.get_config_var("INSTSONAME")        # e.g. libpython3.13.so.1.0 (often better)
-        library = ""
-        
-        candidates = []
-        if python_libdir and instsoname:
-            candidates.append(os.path.join(python_libdir, instsoname))
-        if python_libdir and ldlibrary:
-            candidates.append(os.path.join(python_libdir, ldlibrary))
-        
-        # Fallbacks commonly present in manylinux/musllinux python installs
-        if python_root:
-            candidates.append(os.path.join(python_root, "lib", "libpython3.13.so.1.0"))
-            candidates.append(os.path.join(python_root, "lib", "libpython3.13.so"))
-            candidates.append(os.path.join(python_root, "lib", "libpython3.13.a"))
-        
-        for c in candidates:
-            if c and os.path.exists(c):
-                library = c
-                break
-        
-        python_library = library
+        python_include = sysconfig.get_path("include") or ""
 
+        # 1) Ensure we have a shared libpython we can bundle
+        libpython = _find_existing_libpython(python_root)
+        if not libpython:
+            static_a = _find_static_libpython_fallback()
+            if static_a:
+                # Build the shared libpython into the build temp directory
+                libpython = _build_shared_libpython_from_static(static_a, out_dir=os.path.abspath(self.build_temp))
+            else:
+                # Hard fail: cannot produce a wheel that doesn't require container setup on musl without libpython
+                raise RuntimeError(
+                    "Could not find libpython shared library or static archive to synthesize it. "
+                    "Cannot build self-contained musl wheel."
+                )
+
+        # 2) Configure CMake args
         cmake_args = [
-            '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
-        
-            # Backward compat for older FindPython/FindPythonInterp usage
-            f'-DPYTHON_EXECUTABLE={python_exe}',
-        
-            # What modern CMake FindPython3 respects
-            f'-DPython3_EXECUTABLE={python_exe}',
+            f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}',
+            f'-DPYTHON_EXECUTABLE={python_exe}',          # legacy
+            f'-DPython3_EXECUTABLE={python_exe}',         # FindPython3
             f'-DPython3_ROOT_DIR={python_root}',
             '-DPython3_FIND_STRATEGY=LOCATION',
         ]
-        
-        # Pin headers + libpython explicitly (critical for cibuildwheel images)
+
         if python_include:
-            cmake_args.append(f"-DPython3_INCLUDE_DIR={python_include}")
-            cmake_args.append(f"-DPython3_INCLUDE_DIRS={python_include}")
-        
-        if python_library:
-            cmake_args.append(f"-DPython3_LIBRARY={python_library}")
-            cmake_args.append(f"-DPython3_LIBRARIES={python_library}")
-        
+            cmake_args += [
+                f'-DPython3_INCLUDE_DIR={python_include}',
+                f'-DPython3_INCLUDE_DIRS={python_include}',
+            ]
+
+        # Tell CMake to link against our bundled libpython
+        cmake_args += [f'-DBUNDLED_PYTHON_LIBRARY={libpython}']
+
         print(">>> CMake Python3 hints:")
         print(">>>   Python3_EXECUTABLE =", python_exe)
         print(">>>   Python3_ROOT_DIR   =", python_root)
         print(">>>   Python3_INCLUDE    =", python_include)
-        print(">>>   Python3_LIBRARY    =", python_library)
+        print(">>>   Bundled libpython  =", libpython)
 
         cfg = 'Release'
         build_args = ['--config', cfg, '--target', '_tgvoip']
 
         if platform.system() == "Windows":
-            cmake_args += ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{}={}'.format(cfg.upper(), extdir)]
-            if sys.maxsize > 2**32:
-                cmake_args += ['-A', 'x64']
-            else:
-                cmake_args += ['-A', 'Win32']
-            build_args += ['--', '/m:{}'.format(multiprocessing.cpu_count() + 1)]
+            cmake_args += [f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}']
+            cmake_args += ['-A', 'x64' if sys.maxsize > 2**32 else 'Win32']
+            build_args += ['--', f'/m:{multiprocessing.cpu_count() + 1}']
         else:
-            cmake_args += ['-DCMAKE_BUILD_TYPE=' + cfg]
-            build_args += ['--', '-j{}'.format(multiprocessing.cpu_count() + 1)]
+            cmake_args += [f'-DCMAKE_BUILD_TYPE={cfg}']
+            build_args += ['--', f'-j{multiprocessing.cpu_count() + 1}']
 
         env = os.environ.copy()
-        env['CXXFLAGS'] = '{} -DVERSION_INFO=\\"{}\\"'.format(env.get('CXXFLAGS', ''),
-                                                              self.distribution.get_version())
+        env['CXXFLAGS'] = '{} -DVERSION_INFO=\\"{}\\"'.format(
+            env.get('CXXFLAGS', ''),
+            self.distribution.get_version()
+        )
+
         if not os.path.exists(self.build_temp):
             os.makedirs(self.build_temp)
+
         subprocess.check_call(['cmake', ext.sourcedir] + cmake_args, cwd=self.build_temp, env=env)
         subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=self.build_temp)
+
+        # Copy stub typing file
         shutil.copy(os.path.join('src', '_tgvoip.pyi'), extdir)
+
+        # 3) Bundle libpython next to the extension for musl runtime
+        # Copy to extdir so it gets included in wheel
+        shutil.copy(libpython, extdir)
 
 
 def get_version():
@@ -164,7 +215,7 @@ def get_long_description():
 
 setup(
     name='stefano-pytgvoip',
-    version="0.0.7.7",
+    version="0.0.7.8",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
@@ -192,9 +243,6 @@ setup(
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: Implementation',
         'Programming Language :: Python :: Implementation :: CPython',
         'Programming Language :: C++',
