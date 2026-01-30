@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import platform
+import sysconfig
 import subprocess
 import shutil
 
@@ -67,21 +68,46 @@ class CMakeBuild(build_ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
         #cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
         #              '-DPYTHON_EXECUTABLE=' + sys.executable]
-
         python_exe = sys.executable
         python_root = os.path.dirname(os.path.dirname(python_exe))
-
+        
+        # Force CMake FindPython3 to use the SAME Python that is building the wheel (cibuildwheel cp313),
+        # including headers and libpython (otherwise it may pick system 3.11 dev files).
+        python_include = sysconfig.get_path("include")
+        python_libdir = sysconfig.get_config_var("LIBDIR")
+        python_ldlibrary = sysconfig.get_config_var("LDLIBRARY")
+        python_library = (
+            os.path.join(python_libdir, python_ldlibrary)
+            if python_libdir and python_ldlibrary
+            else ""
+        )
+        
         cmake_args = [
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
-
-            # For old FindPython(Interp) usage (kept for compatibility)
+        
+            # Backward compat for older FindPython/FindPythonInterp usage
             f'-DPYTHON_EXECUTABLE={python_exe}',
-
-            # What CMake FindPython3 actually respects
+        
+            # What modern CMake FindPython3 respects
             f'-DPython3_EXECUTABLE={python_exe}',
             f'-DPython3_ROOT_DIR={python_root}',
             '-DPython3_FIND_STRATEGY=LOCATION',
         ]
+        
+        # Pin headers + libpython explicitly (critical for cibuildwheel images)
+        if python_include:
+            cmake_args.append(f"-DPython3_INCLUDE_DIR={python_include}")
+            cmake_args.append(f"-DPython3_INCLUDE_DIRS={python_include}")
+        
+        if python_library and os.path.exists(python_library):
+            cmake_args.append(f"-DPython3_LIBRARY={python_library}")
+            cmake_args.append(f"-DPython3_LIBRARIES={python_library}")
+        
+        print(">>> CMake Python3 hints:")
+        print(">>>   Python3_EXECUTABLE =", python_exe)
+        print(">>>   Python3_ROOT_DIR   =", python_root)
+        print(">>>   Python3_INCLUDE    =", python_include)
+        print(">>>   Python3_LIBRARY    =", python_library)
 
         cfg = 'Release'
         build_args = ['--config', cfg, '--target', '_tgvoip']
@@ -123,7 +149,7 @@ def get_long_description():
 
 setup(
     name='stefano-pytgvoip',
-    version="0.0.7.5",
+    version="0.0.7.6",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
