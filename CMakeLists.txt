@@ -36,6 +36,7 @@ add_definitions(
 )
 
 add_subdirectory(3rdparty/pybind11)
+find_package(Python3 REQUIRED COMPONENTS Development.Module)
 include_directories(${TGVOIP_INCLUDE_DIR})
 
 if(WIN32)
@@ -65,8 +66,11 @@ list(APPEND SOURCES
 )
 
 pybind11_add_module(_tgvoip ${SOURCES})
-target_link_libraries(_tgvoip PRIVATE lib_tgvoip)
-
+target_link_libraries(_tgvoip PRIVATE
+    lib_tgvoip
+    pybind11::module
+    Python3::Module
+)
 if ((CMAKE_CXX_COMPILER_ID STREQUAL GNU) AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9))
     target_compile_options(_tgvoip PRIVATE
             -Wno-error=deprecated-copy
