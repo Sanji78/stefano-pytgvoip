@@ -23,16 +23,47 @@ from datetime import datetime
 from enum import Enum
 from typing import Union, List
 
-from _tgvoip import (
-    NetType as _NetType,
-    DataSaving as _DataSaving,
-    CallState as _CallState,
-    CallError as _CallError,
-    Stats,
-    Endpoint,
-    VoIPController as _VoIPController,
-    VoIPServerConfig as _VoIPServerConfig
-)
+#from _tgvoip import (
+#    NetType as _NetType,
+#    DataSaving as _DataSaving,
+#    CallState as _CallState,
+#    CallError as _CallError,
+#    Stats,
+#    Endpoint,
+#    VoIPController as _VoIPController,
+#    VoIPServerConfig as _VoIPServerConfig
+#)
+
+import ctypes
+import importlib
+import importlib.util
+
+def _import_tgvoip_native():
+    """
+    Import _tgvoip. On musl/alpine, the dynamic loader may not resolve Python C-API
+    symbols unless the module is loaded with RTLD_GLOBAL.
+    """
+    try:
+        return importlib.import_module("_tgvoip")
+    except Exception:
+        # Retry with RTLD_GLOBAL
+        spec = importlib.util.find_spec("_tgvoip")
+        if spec is None or not spec.origin:
+            raise
+        mode = getattr(ctypes, "RTLD_GLOBAL", 0x100)  # 0x100 is common on Linux
+        ctypes.CDLL(spec.origin, mode=mode)
+        return importlib.import_module("_tgvoip")
+
+_tgvoip = _import_tgvoip_native()
+
+_NetType = _tgvoip.NetType
+_DataSaving = _tgvoip.DataSaving
+_CallState = _tgvoip.CallState
+_CallError = _tgvoip.CallError
+Stats = _tgvoip.Stats
+Endpoint = _tgvoip.Endpoint
+_VoIPController = _tgvoip.VoIPController
+_VoIPServerConfig = _tgvoip.VoIPServerConfig
 
 from tgvoip.utils import get_real_elapsed_time
 

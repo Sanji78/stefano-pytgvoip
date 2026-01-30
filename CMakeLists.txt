@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with PytgVoIP.  If not, see <http://www.gnu.org/licenses/>.
 
+
 cmake_minimum_required(VERSION 3.13)
 project(pylibtgvoip)
 set(CMAKE_CXX_STANDARD 14)
@@ -28,7 +29,6 @@ endif()
 if(APPLE)
     set(OPENSSL_ROOT_DIR /usr/local/opt/openssl/)
 endif()
-
 add_definitions(
         -DTGVOIP_USE_CALLBACK_AUDIO_IO
         -DWITHOUT_ALSA
@@ -36,11 +36,7 @@ add_definitions(
 )
 
 add_subdirectory(3rdparty/pybind11)
-
-# Optional: if setup.py provides a bundled libpython path, we will link to it
-# and set RPATH to $ORIGIN so the loader finds it next to the extension.
-set(BUNDLED_PYTHON_LIBRARY "" CACHE FILEPATH "Path to a bundled libpython shared library to link against")
-
+find_package(Python3 REQUIRED COMPONENTS Development.Module)
 include_directories(${TGVOIP_INCLUDE_DIR})
 
 if(WIN32)
@@ -48,16 +44,13 @@ if(WIN32)
 else()
     set(DESKTOP_APP_USE_PACKAGED TRUE)
 endif()
-
 include(cmake/nice_target_sources.cmake)
 include(cmake/target_link_frameworks.cmake)
 include(cmake/target_link_static_libraries.cmake)
 include(cmake/init_target.cmake)
 include(cmake/options.cmake)
-
 add_subdirectory(cmake/external/openssl)
 add_subdirectory(cmake/external/opus)
-
 get_filename_component(third_party_loc 3rdparty REALPATH)
 include(src/libtgvoip.cmake)
 
@@ -73,27 +66,11 @@ list(APPEND SOURCES
 )
 
 pybind11_add_module(_tgvoip ${SOURCES})
-
 target_link_libraries(_tgvoip PRIVATE
     lib_tgvoip
     pybind11::module
+    Python3::Module
 )
-
-# If a bundled libpython is provided, link against it and ensure it is found at runtime.
-if (BUNDLED_PYTHON_LIBRARY)
-    message(STATUS "Linking _tgvoip against bundled libpython: ${BUNDLED_PYTHON_LIBRARY}")
-    target_link_libraries(_tgvoip PRIVATE "${BUNDLED_PYTHON_LIBRARY}")
-
-    if (UNIX AND NOT APPLE)
-        # Ensure runtime loader can find bundled libpython in the same directory as the extension.
-        set_target_properties(_tgvoip PROPERTIES
-            BUILD_RPATH "\$ORIGIN"
-            INSTALL_RPATH "\$ORIGIN"
-        )
-        target_link_options(_tgvoip PRIVATE "-Wl,-rpath,\$ORIGIN")
-    endif()
-endif()
-
 if ((CMAKE_CXX_COMPILER_ID STREQUAL GNU) AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9))
     target_compile_options(_tgvoip PRIVATE
             -Wno-error=deprecated-copy
@@ -103,7 +80,6 @@ endif()
 if (WIN32)
     target_compile_options(lib_tgvoip PRIVATE /wd4477 /wd4267)
 endif()
-
 # macOS and its weird paths
 target_include_directories(lib_tgvoip PRIVATE /usr/local/include)
 target_link_directories(_tgvoip PRIVATE /usr/local/lib)
