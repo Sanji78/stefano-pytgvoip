@@ -108,7 +108,7 @@ def get_long_description():
 
 setup(
     name='stefano-pytgvoip',
-    version="0.0.7.4",
+    version="0.0.7.5",
     license='LGPLv3+',
     author='bakatrouble',
     author_email='bakatrouble@gmail.com',
