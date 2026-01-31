@@ -16,7 +16,7 @@
 #define MODULES_AUDIO_PROCESSING_AEC_AEC_CORE_H_
 
 #include <stddef.h>
-
+#include <cstdint>
 #include <memory>
 
 extern "C" {

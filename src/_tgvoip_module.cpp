@@ -26,6 +26,7 @@
 PYBIND11_MODULE(_tgvoip, m) {
 //    py::options options;
 //    options.disable_function_signatures();
+    PyEval_InitThreads();
 
     py::register_exception_translator([](std::exception_ptr p) {
         try {

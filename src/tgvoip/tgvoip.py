@@ -39,6 +39,11 @@ import importlib
 import importlib.util
 
 def _import_tgvoip_native():
+    from . import _tgvoip
+    return _tgvoip
+
+
+def _import_tgvoip_native_old():
     """
     Import _tgvoip. On musl/alpine, the dynamic loader may not resolve Python C-API
     symbols unless the module is loaded with RTLD_GLOBAL.

@@ -12,7 +12,7 @@
 #define MODULES_AUDIO_PROCESSING_AEC_ECHO_CANCELLATION_H_
 
 #include <memory>
-
+#include <cstdint>
 #include <stddef.h>
 
 extern "C" {

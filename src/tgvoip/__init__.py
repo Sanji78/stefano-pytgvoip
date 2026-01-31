@@ -17,7 +17,7 @@
 # along with PytgVoIP.  If not, see <http://www.gnu.org/licenses/>.
 
 
-from tgvoip.tgvoip import *
-from tgvoip.tgvoip import __all__
-
-__version__ = '0.0.7.1'
+#from tgvoip.tgvoip import *
+#from tgvoip.tgvoip import __all__
+from .tgvoip import *
+__version__ = '0.0.7.4'

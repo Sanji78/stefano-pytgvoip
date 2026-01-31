@@ -242,18 +242,20 @@ void VoIPController::_handle_signal_bars_change(int count) {
 
 void VoIPController::send_audio_frame(int16_t *buf, size_t size) {
     tgvoip::MutexGuard m(input_mutex);
-    // auto start = std::chrono::high_resolution_clock::now();
+
     if (native_io) {
         this->_send_audio_frame_native_impl(buf, size);
-    } else {
-        char *frame = this->_send_audio_frame_impl(sizeof(int16_t) * size);
-        if (frame != nullptr) {
-            memcpy(buf, frame, sizeof(int16_t) * size);
-        }
+        return;
     }
-    // auto finish = std::chrono::high_resolution_clock::now();
-    // std::cout << "send: " << std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start).count() << std::endl;
+
+    py::gil_scoped_acquire gil;   // 🔥 REQUIRED
+
+    char *frame = this->_send_audio_frame_impl(sizeof(int16_t) * size);
+    if (frame != nullptr) {
+        memcpy(buf, frame, sizeof(int16_t) * size);
+    }
 }
+
 
 char *VoIPController::_send_audio_frame_impl(unsigned long len) { return (char *)""; }
 
@@ -280,18 +282,22 @@ void VoIPController::_send_audio_frame_native_impl(int16_t *buf, size_t size) {
 
 void VoIPController::recv_audio_frame(int16_t *buf, size_t size) {
     tgvoip::MutexGuard m(output_mutex);
-    // auto start = std::chrono::high_resolution_clock::now();
-    if (buf != nullptr) {
-        if (native_io) {
-            this->_recv_audio_frame_native_impl(buf, size);
-        } else {
-            std::string frame((const char *) buf, sizeof(int16_t) * size);
-            this->_recv_audio_frame_impl(frame);
-        }
+
+    if (buf == nullptr)
+        return;
+
+    if (native_io) {
+        this->_recv_audio_frame_native_impl(buf, size);
+        return;
     }
-    // auto finish = std::chrono::high_resolution_clock::now();
-    // std::cout << "recv: " << std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start).count() << std::endl;
+
+    py::gil_scoped_acquire gil;   // 🔥 REQUIRED
+
+    py::bytes frame(reinterpret_cast<const char *>(buf),
+                    sizeof(int16_t) * size);
+    this->_recv_audio_frame_impl(frame);
 }
+
 
 void VoIPController::_recv_audio_frame_impl(const py::bytes &frame) {}
 

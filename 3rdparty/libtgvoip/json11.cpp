@@ -27,7 +27,7 @@
 #include <limits>
 #include <sstream>
 #include <locale>
-
+#include <cstdint>
 namespace json11 {
 
 static const int max_depth = 200;
