@@ -157,6 +157,7 @@ private:
     tgvoip::Mutex input_mutex;
 
     bool native_io = false;
+    bool is_shutting_down = false;
     std::queue<FILE*> input_files;
     std::queue<FILE*> hold_files;
     FILE *output_file = nullptr;

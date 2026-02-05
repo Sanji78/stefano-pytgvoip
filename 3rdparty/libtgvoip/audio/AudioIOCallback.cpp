@@ -1,9 +1,3 @@
-//
-// libtgvoip is free and unencumbered public domain software.
-// For more information, see http://unlicense.org or the UNLICENSE file
-// you should have received with this source code distribution.
-//
-
 #include "AudioIOCallback.h"
 #include "../VoIPController.h"
 #include "../logging.h"
@@ -13,109 +7,167 @@ using namespace tgvoip::audio;
 
 #pragma mark - IO
 
-AudioIOCallback::AudioIOCallback(){
-	input=new AudioInputCallback();
-	output=new AudioOutputCallback();
+AudioIOCallback::AudioIOCallback() {
+    input  = new AudioInputCallback();
+    output = new AudioOutputCallback();
 }
 
-AudioIOCallback::~AudioIOCallback(){
-	delete input;
-	delete output;
+AudioIOCallback::~AudioIOCallback() {
+    // Ensure worker threads are asked to exit before objects are deleted
+    Stop();
+    delete input;
+    delete output;
 }
 
-AudioInput* AudioIOCallback::GetInput(){
-	return input;
+AudioInput* AudioIOCallback::GetInput() {
+    return input;
 }
 
-AudioOutput* AudioIOCallback::GetOutput(){
-	return output;
+AudioOutput* AudioIOCallback::GetOutput() {
+    return output;
 }
 
 #pragma mark - Input
 
-AudioInputCallback::AudioInputCallback(){
-	thread=new Thread(std::bind(&AudioInputCallback::RunThread, this));
-	thread->SetName("AudioInputCallback");
+AudioInputCallback::AudioInputCallback() {
+    running   = false;
+    recording = false;
+    thread = new Thread(std::bind(&AudioInputCallback::RunThread, this));
+    thread->SetName("AudioInputCallback");
 }
 
-AudioInputCallback::~AudioInputCallback(){
-	running=false;
-	thread->Join();
-	delete thread;
+AudioInputCallback::~AudioInputCallback() {
+    // Ensure thread exits and is joined once
+    running   = false;
+    recording = false;
+    if (thread) {
+        thread->Join();
+        delete thread;
+        thread = nullptr;
+    }
 }
 
-void AudioInputCallback::Start(){
-	if(!running){
-		running=true;
-		thread->Start();
-	}
-	recording=true;
+void AudioInputCallback::Start() {
+    if (!running) {
+        running   = true;
+        thread->Start();
+    }
+    recording = true;
 }
+
+// PATCH 3: AudioInputCallback::Stop
 
 void AudioInputCallback::Stop(){
-	recording=false;
+        if(!running)
+                return;
+        recording=false;
+        running=false;    // make RunThread exit ASAP
+        if(thread){
+                thread->Join();
+        }
 }
 
-void AudioInputCallback::SetDataCallback(std::function<void(int16_t*, size_t)> c){
-	dataCallback=c;
+void AudioInputCallback::SetDataCallback(std::function<void(int16_t*, size_t)> c) {
+    dataCallback = std::move(c);
 }
+
+// PATCH 1: AudioInputCallback::RunThread
 
 void AudioInputCallback::RunThread(){
-	int16_t buf[960];
-	while(running){
-		double t=VoIPController::GetCurrentTime();
-		memset(buf, 0, sizeof(buf));
-		dataCallback(buf, 960);
-		InvokeCallback(reinterpret_cast<unsigned char*>(buf), 960*2);
-		double sl=0.02-(VoIPController::GetCurrentTime()-t);
-		if(sl>0)
-			Thread::Sleep(sl);
-	}
+        int16_t buf[960];
+        while(running){
+                // --- added to re-check and avoid blocking if stop was requested ---
+                if (!running)
+                        break;
+
+                double t=VoIPController::GetCurrentTime();
+                memset(buf, 0, sizeof(buf));
+                if(dataCallback){
+                        dataCallback(buf, 960);
+                }
+                InvokeCallback(reinterpret_cast<unsigned char*>(buf), 960*2);
+                double sl=0.02-(VoIPController::GetCurrentTime()-t);
+                if(sl>0){
+                        // Sleep in small chunks and re-check 'running'
+                        const double step = 0.005;
+                        while(sl>0 && running){
+                                Thread::Sleep(std::min(sl, step));
+                                sl-=step;
+                        }
+                }
+        }
 }
 
 #pragma mark - Output
 
-AudioOutputCallback::AudioOutputCallback(){
-	thread=new Thread(std::bind(&AudioOutputCallback::RunThread, this));
-	thread->SetName("AudioOutputCallback");
+AudioOutputCallback::AudioOutputCallback() {
+    running = false;
+    playing = false;
+    thread = new Thread(std::bind(&AudioOutputCallback::RunThread, this));
+    thread->SetName("AudioOutputCallback");
 }
 
-AudioOutputCallback::~AudioOutputCallback(){
-	running=false;
-	thread->Join();
-	delete thread;
+AudioOutputCallback::~AudioOutputCallback() {
+    running = false;
+    playing = false;
+    if (thread) {
+        thread->Join();
+        delete thread;
+        thread = nullptr;
+    }
 }
 
-void AudioOutputCallback::Start(){
-	if(!running){
-		running=true;
-		thread->Start();
-	}
-	playing=true;
+void AudioOutputCallback::Start() {
+    if (!running) {
+        running = true;
+        thread->Start();
+    }
+    playing = true;
 }
+
+// PATCH 4: AudioOutputCallback::Stop
 
 void AudioOutputCallback::Stop(){
-	playing=false;
+        if(!running)
+                return;
+        playing=false;
+        running=false;     // make RunThread exit ASAP
+        if(thread){
+                thread->Join();
+        }
 }
 
-bool AudioOutputCallback::IsPlaying(){
-	return playing;
+bool AudioOutputCallback::IsPlaying() {
+    return playing;
 }
 
-void AudioOutputCallback::SetDataCallback(std::function<void(int16_t*, size_t)> c){
-	dataCallback=c;
+void AudioOutputCallback::SetDataCallback(std::function<void(int16_t*, size_t)> c) {
+    dataCallback = std::move(c);
 }
+
+// PATCH 2: AudioOutputCallback::RunThread
 
 void AudioOutputCallback::RunThread(){
-	int16_t buf[960];
-	while(running){
-		double t=VoIPController::GetCurrentTime();
-		InvokeCallback(reinterpret_cast<unsigned char*>(buf), 960*2);
-		dataCallback(buf, 960);
-		double sl=0.02-(VoIPController::GetCurrentTime()-t);
-		if(sl>0)
-			Thread::Sleep(sl);
-	}
+        int16_t buf[960];
+        while(running){
+                // --- added to re-check and avoid blocking if stop was requested ---
+                if (!running)
+                        break;
+
+                double t=VoIPController::GetCurrentTime();
+                memset(buf, 0, sizeof(buf));
+                InvokeCallback(reinterpret_cast<unsigned char*>(buf), 960*2);
+                if(dataCallback){
+                        dataCallback(buf, 960);
+                }
+                double sl=0.02-(VoIPController::GetCurrentTime()-t);
+                if(sl>0){
+                        // Sleep in small chunks and re-check 'running'
+                        const double step = 0.005;
+                        while(sl>0 && running){
+                                Thread::Sleep(std::min(sl, step));
+                                sl-=step;
+                        }
+                }
+        }
 }
-
-

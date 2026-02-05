@@ -42,82 +42,94 @@ MessageThread::~MessageThread(){
 #endif
 }
 
-void MessageThread::Stop(){
-	if(running){
-		running=false;
-#ifdef _WIN32
-		SetEvent(event);
+void MessageThread::HardStop(){
+    queueMutex.Lock();
+    running = false;
+    hardStopped.store(true, std::memory_order_release);
+    queue.clear();  // drop all pending messages
+#ifndef _WIN32
+    pthread_cond_broadcast(&cond);
 #else
-		pthread_cond_signal(&cond);
+    SetEvent(event);
 #endif
-		Join();
-	}
+    queueMutex.Unlock();
+}
+
+void MessageThread::Stop(){
+        queueMutex.Lock();
+        running=false;
+        queue.clear();                      // <--- NEW: drop all pending messages
+#ifndef _WIN32
+        pthread_cond_broadcast(&cond);
+#else
+        SetEvent(event);
+#endif
+        queueMutex.Unlock();
 }
 
 void MessageThread::Run(){
-	queueMutex.Lock();
-	while(running){
-		double currentTime=VoIPController::GetCurrentTime();
-		double waitTimeout=queue.empty() ? DBL_MAX : (queue[0].deliverAt-currentTime);
-		//LOGW("MessageThread wait timeout %f", waitTimeout);
-		if(waitTimeout>0.0){
-#ifdef _WIN32
-			queueMutex.Unlock();
-			DWORD actualWaitTimeout=waitTimeout==DBL_MAX ? INFINITE : ((DWORD)round(waitTimeout*1000.0));
-#if !defined(WINAPI_FAMILY) || WINAPI_FAMILY!=WINAPI_FAMILY_PHONE_APP
-			WaitForSingleObject(event, actualWaitTimeout);
+        queueMutex.Lock();
+        while(running){
+                double currentTime=VoIPController::GetCurrentTime();
+                double waitTimeout=queue.empty() ? DBL_MAX : (queue[0].deliverAt-currentTime);
+                if(waitTimeout>0.0){
+#ifndef _WIN32
+                        if(waitTimeout!=DBL_MAX){
+                                struct timeval now;
+                                struct timespec timeout;
+                                gettimeofday(&now, NULL);
+                                waitTimeout+=now.tv_sec;
+                                waitTimeout+=(now.tv_usec/1000000.0);
+                                timeout.tv_sec=(time_t)(floor(waitTimeout));
+                                timeout.tv_nsec=(long)((waitTimeout-floor(waitTimeout))*1000000000.0);
+                                pthread_cond_timedwait(&cond, queueMutex.NativeHandle(), &timeout);
+                        }else{
+                                pthread_cond_wait(&cond, queueMutex.NativeHandle());
+                        }
 #else
-			WaitForSingleObjectEx(event, actualWaitTimeout, false);
+                        queueMutex.Unlock();
+                        DWORD actualWaitTimeout=waitTimeout==DBL_MAX ? INFINITE : ((DWORD)round(waitTimeout*1000.0));
+                        WaitForSingleObject(event, actualWaitTimeout);
+                        queueMutex.Lock();
 #endif
-			// we don't really care if a context switch happens here and anything gets added to the queue by another thread
-			// since any new no-delay messages will get delivered on this iteration anyway
-			queueMutex.Lock();
-#else
-			if(waitTimeout!=DBL_MAX){
-				struct timeval now;
-				struct timespec timeout;
-				gettimeofday(&now, NULL);
-				waitTimeout+=now.tv_sec;
-				waitTimeout+=(now.tv_usec/1000000.0);
-				timeout.tv_sec=(time_t)(floor(waitTimeout));
-				timeout.tv_nsec=(long)((waitTimeout-floor(waitTimeout))*1000000000.0);
-				pthread_cond_timedwait(&cond, queueMutex.NativeHandle(), &timeout);
-			}else{
-				pthread_cond_wait(&cond, queueMutex.NativeHandle());
-			}
-#endif
-		}
-		if(!running){
-			queueMutex.Unlock();
-			return;
-		}
-		currentTime=VoIPController::GetCurrentTime();
-		std::vector<Message> msgsToDeliverNow;
-		for(std::vector<Message>::iterator m=queue.begin();m!=queue.end();){
-			if(m->deliverAt==0.0 || currentTime>=m->deliverAt){
-				msgsToDeliverNow.push_back(*m);
-				m=queue.erase(m);
-				continue;
-			}
-			++m;
-		}
+                }
 
-		for(Message& m:msgsToDeliverNow){
-			//LOGI("MessageThread delivering %u", m.msg);
-			cancelCurrent=false;
-			if(m.deliverAt==0.0)
-				m.deliverAt=VoIPController::GetCurrentTime();
-			if(m.func!=nullptr){
-				m.func();
-			}
-			if(!cancelCurrent && m.interval>0.0){
-				m.deliverAt+=m.interval;
-				InsertMessageInternal(m);
-			}
-		}
+                if(!running){
+                        break;
+                }
 
-	}
-	queueMutex.Unlock();
+                currentTime=VoIPController::GetCurrentTime();
+                std::vector<Message> msgsToDeliverNow;
+                for(std::vector<Message>::iterator m=queue.begin();m!=queue.end();){
+                        if(m->deliverAt==0.0 || currentTime>=m->deliverAt){
+                                msgsToDeliverNow.push_back(*m);
+                                m=queue.erase(m);
+                                continue;
+                        }
+                        ++m;
+                }
+
+                // NEW: if HardStop was requested, do NOT execute any callbacks
+                if(hardStopped.load(std::memory_order_acquire)){
+                        // just drop msgsToDeliverNow and exit
+                        break;
+                }
+
+                for(Message& m:msgsToDeliverNow){
+                        cancelCurrent=false;
+                        if(m.deliverAt==0.0)
+                                m.deliverAt=VoIPController::GetCurrentTime();
+                        if(m.func!=nullptr){
+                                m.func();
+                        }
+                        if(!cancelCurrent && m.interval>0.0){
+                                m.deliverAt+=m.interval;
+                                InsertMessageInternal(m);
+                        }
+                }
+
+        }
+        queueMutex.Unlock();
 }
 
 uint32_t MessageThread::Post(std::function<void()> func, double delay, double interval){

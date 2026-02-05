@@ -42,9 +42,23 @@ void VoIPController::init() {
     ctrl = new tgvoip::VoIPController();
     ctrl->implData = (void *)this;
     tgvoip::VoIPController::Callbacks callbacks {};
-    callbacks.connectionStateChanged = [](tgvoip::VoIPController *ctrl, int state) {
-        ((VoIPController *)ctrl->implData)->_handle_state_change(CallState(state));
-    };
+    //callbacks.connectionStateChanged = [](tgvoip::VoIPController *ctrl, int state) {
+    //    ((VoIPController *)ctrl->implData)->_handle_state_change(CallState(state));
+    //};
+callbacks.connectionStateChanged = [](tgvoip::VoIPController *ctrl, int state) {
+    VoIPController* voip_ctrl = (VoIPController *)ctrl->implData;
+    
+    // DON'T call Python during shutdown!
+    if (voip_ctrl->is_shutting_down) {
+        return;  // ← Prevent callback execution
+    }
+    
+    try {
+        voip_ctrl->_handle_state_change(CallState(state));
+    } catch (...) {
+        // Swallow exceptions during callback
+    }
+};
     callbacks.signalBarCountChanged = [](tgvoip::VoIPController *ctrl, int count) {
         ((VoIPController *)ctrl->implData)->_handle_signal_bars_change(count);
     };
@@ -81,9 +95,21 @@ void VoIPController::init() {
 }
 
 VoIPController::~VoIPController() {
-    ctrl->Stop();
+    is_shutting_down = true;
+    // Release GIL BEFORE stopping - prevents deadlock
+    {
+        py::gil_scoped_release release;  // ← ADD THIS
+        ctrl->Stop();
+        // Wait for all callbacks to complete
+        // (Stop() should handle this internally)
+    }
+    //ctrl->Stop();
     std::vector<uint8_t> state = ctrl->GetPersistentState();
-    delete ctrl;
+    {
+        py::gil_scoped_release release;  // ← Also here
+        delete ctrl;
+    }
+    //delete ctrl;
     clear_play_queue();
     clear_hold_queue();
     unset_output_file();

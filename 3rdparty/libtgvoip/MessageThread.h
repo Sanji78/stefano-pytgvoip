@@ -7,6 +7,7 @@
 
 #include "threading.h"
 #include "utils.h"
+#include <atomic>
 #include <vector>
 #include <functional>
 
@@ -20,7 +21,7 @@ namespace tgvoip{
 		void Cancel(uint32_t id);
 		void CancelSelf();
 		void Stop();
-
+		void HardStop();  // new
 		enum{
 			INVALID_ID=0
 		};
@@ -40,6 +41,7 @@ namespace tgvoip{
 		Mutex queueMutex;
 		uint32_t lastMessageID=1;
 		bool cancelCurrent=false;
+		std::atomic<bool> hardStopped{false};  // new
 
 #ifdef _WIN32
 		HANDLE event;

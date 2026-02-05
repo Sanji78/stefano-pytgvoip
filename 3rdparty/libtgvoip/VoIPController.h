@@ -641,7 +641,7 @@ namespace tgvoip{
 		Mutex sendBufferMutex;
 		Mutex endpointsMutex;
 		Mutex socketSelectMutex;
-		bool stopping;
+		std::atomic<bool> stopping;
 		bool audioOutStarted;
 		Thread* recvThread;
 		Thread* sendThread;

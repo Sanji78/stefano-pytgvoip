@@ -94,9 +94,13 @@ EchoCanceller::EchoCanceller(bool enableAEC, bool enableNS, bool enableAGC){
 
 EchoCanceller::~EchoCanceller(){
 #ifndef TGVOIP_NO_DSP
+    // Make sure the thread is stopped before freeing resources
+    Stop();
 	delete apm;
 	delete audioFrame;
 	delete farendBufferPool;
+    delete farendQueue;
+    // bufferFarendThread is deleted in Stop()
 #endif
 }
 
@@ -105,7 +109,23 @@ void EchoCanceller::Start(){
 }
 
 void EchoCanceller::Stop(){
+#ifndef TGVOIP_NO_DSP
+    if(!running)
+        return;
+    running = false;
 
+    // Wake up RunBufferFarendThread if it is blocked in GetBlocking()
+    if(farendQueue){
+        // Put a sentinel NULL pointer to unblock the queue
+        farendQueue->Put(nullptr);
+    }
+
+    if(bufferFarendThread){
+        bufferFarendThread->Join();
+        delete bufferFarendThread;
+        bufferFarendThread = nullptr;
+    }
+#endif
 }
 
 
@@ -129,6 +149,10 @@ void EchoCanceller::RunBufferFarendThread(){
 	frame.samples_per_channel_=480;
 	while(running){
 		int16_t* samplesIn=farendQueue->GetBlocking();
+        if(!samplesIn){
+            // Sentinel from Stop()
+            break;
+        }
 		if(samplesIn){
 			memcpy(frame.mutable_data(), samplesIn, 480*2);
 			apm->ProcessReverseStream(&frame);

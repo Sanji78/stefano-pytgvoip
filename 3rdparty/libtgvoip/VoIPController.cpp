@@ -35,6 +35,8 @@
 #include "opus.h"
 #endif
 
+#include <thread>
+#include <chrono>
 
 inline int pad4(int x){
 	int r=PAD4(x);
@@ -189,19 +191,20 @@ VoIPController::~VoIPController(){
 	LOGD("Entered VoIPController::~VoIPController");
 	if(!stopping){
 		LOGE("!!!!!!!!!!!!!!!!!!!! CALL controller->Stop() BEFORE DELETING THE CONTROLLER OBJECT !!!!!!!!!!!!!!!!!!!!!!!1");
-		abort();
+		Stop();
+		//abort();
 	}
 	LOGD("before close socket");
 	if(udpSocket)
-		delete udpSocket;
+		delete udpSocket; udpSocket = nullptr;
 	if(udpSocket!=realUdpSocket)
-		delete realUdpSocket;
-	LOGD("before delete audioIO");
-	if(audioIO){
-		delete audioIO;
-		audioInput=NULL;
-		audioOutput=NULL;
-	}
+		delete realUdpSocket; realUdpSocket = nullptr;
+LOGD("before delete audioIO");
+// audioIO teardown is already effectively done in Stop(); avoid destructor-time
+// locking that can hang when Python is still unwinding.
+audioIO = nullptr;
+audioInput = nullptr;
+audioOutput = nullptr;
 	for(vector<shared_ptr<Stream>>::iterator _stm=incomingStreams.begin();_stm!=incomingStreams.end();++_stm){
 		shared_ptr<Stream> stm=*_stm;
 		LOGD("before stop decoder");
@@ -239,45 +242,116 @@ VoIPController::~VoIPController(){
 #endif
 }
 
-void VoIPController::Stop(){
-	LOGD("Entered VoIPController::Stop");
-	stopping=true;
-	runReceiver=false;
-	LOGD("before shutdown socket");
-	if(udpSocket)
-		udpSocket->Close();
-	if(realUdpSocket!=udpSocket)
-		realUdpSocket->Close();
-	selectCanceller->CancelSelect();
-	Buffer emptyBuf(0);
-	//PendingOutgoingPacket emptyPacket{0, 0, 0, move(emptyBuf), 0};
-	//sendQueue->Put(move(emptyPacket));
-	LOGD("before join sendThread");
-	if(sendThread){
-		sendThread->Join();
-		delete sendThread;
-	}
-	LOGD("before join recvThread");
-	if(recvThread){
-		recvThread->Join();
-		delete recvThread;
-	}
-	LOGD("before stop messageThread");
-	messageThread.Stop();
-	{
-		LOGD("Before stop audio I/O");
-		MutexGuard m(audioIOMutex);
-		if(audioInput){
-			audioInput->Stop();
-			audioInput->SetCallback(NULL, NULL);
-		}
-		if(audioOutput){
-			audioOutput->Stop();
-			audioOutput->SetCallback(NULL, NULL);
-		}
-	}
-	LOGD("Left VoIPController::Stop [need rate = %d]", (int)needRate);
+void VoIPController::Stop() {
+    LOGD("Entered VoIPController::Stop");
+    if (stopping)
+        return;  // Prevent double-stop
+    stopping = true;
+    runReceiver = false;
+
+    selectCanceller->CancelSelect();
+
+    LOGD("before join sendThread");
+    if (sendThread) {
+        // Avoid deadlock if Stop() is ever called from inside sendThread itself
+        if (!sendThread->IsCurrent()) {
+            sendThread->Join();
+        }
+        delete sendThread;
+        sendThread = nullptr;
+    }
+
+    LOGD("before join recvThread");
+    if (recvThread) {
+        // Avoid deadlock if Stop() is ever called from inside recvThread itself
+        if (!recvThread->IsCurrent()) {
+            recvThread->Join();
+        }
+        delete recvThread;
+        recvThread = nullptr;
+    }
+
+    LOGD("before shutdown socket");
+    if (udpSocket) {
+        udpSocket->Close();
+    }
+    if (realUdpSocket && realUdpSocket != udpSocket) {
+        realUdpSocket->Close();
+    }
+
+    LOGD("before stop messageThread");
+    messageThread.HardStop();
+
+    // Cancel periodic timers to avoid late callbacks into a dying controller
+    if(noStreamsNopID != MessageThread::INVALID_ID){
+        messageThread.Cancel(noStreamsNopID);
+        noStreamsNopID = MessageThread::INVALID_ID;
+    }
+    if(udpPingTimeoutID != MessageThread::INVALID_ID){
+        messageThread.Cancel(udpPingTimeoutID);
+        udpPingTimeoutID = MessageThread::INVALID_ID;
+    }
+    // Add any other timer IDs you keep (RTT, bitrate, etc.) here.
+
+    LOGD("Stopping echo canceller / encoder / decoders");
+    {
+        if (echoCanceller) {
+            echoCanceller->Stop();
+        }
+        if (encoder) {
+            encoder->Stop();
+        }
+        for (auto& _stm : incomingStreams) {
+            auto stm = _stm;
+            if (stm && stm->decoder) {
+                stm->decoder->Stop();
+            }
+        }
+    }
+
+    LOGD("Before stop audio I/O");
+    {
+        // *** CRITICAL CHANGE: do NOT lock audioIOMutex here ***
+        // The Python runtime holds the GIL and may try to grab audioIOMutex
+        // inside callbacks / destructors, causing a cross-runtime deadlock.
+        // We just null out the pointers so that no further use is possible.
+
+#if defined(TGVOIP_USE_CALLBACK_AUDIO_IO)
+        // If we are using callback-based audio, stop its internal threads first.
+        if (audioIO) {
+            auto* cbIO = dynamic_cast<audio::AudioIOCallback*>(audioIO);
+            if (cbIO) {
+                cbIO->Stop();   // signals AudioInputCallback/AudioOutputCallback to exit
+            }
+        }
+#endif
+
+        // Detach callbacks so no more calls will go into VoIPController / Python
+        if (audioInput) {
+            audioInput->SetCallback(NULL, NULL);
+        }
+        if (audioOutput) {
+            audioOutput->SetCallback(NULL, NULL);
+        }
+    }
+
+#if defined(TGVOIP_USE_CALLBACK_AUDIO_IO)
+    LOGD("Waiting 200ms for callback audio threads to exit");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+#endif
+
+    LOGD("Left VoIPController::Stop [need rate = %d]", (int)needRate);
+
+    // Defensive: zero pointers, but DO NOT delete audioIO here;
+    // destructor runs after this and must see these as null.
+    audioIO = nullptr;
+    audioInput = nullptr;
+    audioOutput = nullptr;
+    udpSocket = nullptr;
+    realUdpSocket = nullptr;
+    selectCanceller = nullptr;
 }
+
 
 bool VoIPController::NeedRate(){
 	return needRate && ServerConfig::GetSharedInstance()->GetBoolean("bad_call_rating", false);

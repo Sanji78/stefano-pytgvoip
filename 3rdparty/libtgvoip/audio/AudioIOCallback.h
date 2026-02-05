@@ -21,6 +21,7 @@ namespace tgvoip{
 			virtual void Start() override;
 			virtual void Stop() override;
 			void SetDataCallback(std::function<void(int16_t*, size_t)> c);
+			void RequestStop() { running = false; recording = false; }
 		private:
 			void RunThread();
 			bool running=false;
@@ -37,6 +38,7 @@ namespace tgvoip{
 			virtual void Stop() override;
 			virtual bool IsPlaying() override;
 			void SetDataCallback(std::function<void(int16_t*, size_t)> c);
+			void RequestStop() { running = false; playing = false; }
 		private:
 			void RunThread();
 			bool running=false;
@@ -51,6 +53,15 @@ namespace tgvoip{
 			virtual ~AudioIOCallback();
 			virtual AudioInput* GetInput() override;
 			virtual AudioOutput* GetOutput() override;
+    // NEW: stop internal worker threads
+    void Stop() {
+        if (input) {
+            static_cast<AudioInputCallback*>(input)->RequestStop();
+        }
+        if (output) {
+            static_cast<AudioOutputCallback*>(output)->RequestStop();
+        }
+    }
 		private:
 			AudioInputCallback* input;
 			AudioOutputCallback* output;
