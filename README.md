@@ -14,9 +14,7 @@ generation of Python extension written in C++.
 
 It is targeted to MTProto client library developers, detailed usage guide is available [here](https://pytgvoip.readthedocs.io/en/latest/guides/usage.html).
 
-An example of usage with [Pyrogram](https://github.com/pyrogram/pyrogram) is available [here](https://github.com/bakatrouble/pytgvoip_pyrogram) ([`pytgvoip_pyrogram` in PyPI](https://pypi.org/project/pytgvoip_pyrogram/)), could be used as reference.
-
-Hopefully this module support will be [integrated in Pyrogram itself](https://github.com/pyrogram/pyrogram/pull/218), also [@cher-nov](https://github.com/cher-nov) has plans to integrate it into [Telethon](https://github.com/LonamiWebs/Telethon) as well
+An example of usage with [Pyrogram](https://github.com/Sanji78/stefano-pyrogram) is available [here](https://github.com/Sanji78/stefano-pytgvoip-pyrogram) ([`pytgvoip_pyrogram` in PyPI](https://pypi.org/project/pytgvoip_pyrogram/)), could be used as reference.
 
 ## Features
 * Python callbacks for sending and receiving audio stream frames allow flexible control
@@ -32,7 +30,7 @@ Linux, MacOS: (use binary wheels from PyPI for Windows)
 ## Installing
 ```pip3 install pytgvoip```
 
-Install [`pytgvoip_pyrogram`](https://github.com/bakatrouble/pytgvoip_pyrogram) to use this module with Pyrogram.
+Install [`pytgvoip_pyrogram`](https://github.com/Sanji78/stefano-pytgvoip-pyrogram) to use this module with Pyrogram.
 
 
 ## Encoding audio streams
@@ -42,6 +40,15 @@ $ ffmpeg -i input.mp3 -f s16le -ac 1 -ar 48000 -acodec pcm_s16le input.raw  # en
 $ ffmpeg -f s16le -ac 1 -ar 48000 -acodec pcm_s16le -i output.raw output.mp3  # decode
 ```
 
-## Copyright & License
-* Copyright (C) 2019 [bakatrouble](https://github.com/bakatrouble)
-* Licensed under the terms of the [GNU Lesser General Public License v3 or later (LGPLv3+)](COPYING.lesser)
+---
+
+## ❤️ Donate
+If this project helps you, consider buying me a coffee:  
+**[PayPal](https://www.paypal.me/elenacapasso80)**.
+
+..and yes... 😊 the paypal account is correct. Thank you so much!
+
+---
+
+## 📜 License
+[MIT](LICENSE.md)
