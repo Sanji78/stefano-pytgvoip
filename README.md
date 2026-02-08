@@ -4,7 +4,7 @@
  
 **Telegram VoIP Library for Python**
 
-[Community](https://t.me/pytgvoip) | [Documentation](https://pytgvoip.rtfd.io)
+[Documentation](https://pytgvoip.rtfd.io)
 
 **PytgVoIP** is a [Telegram](https://telegram.org/) VoIP library written in Python and C++.
 
