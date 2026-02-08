@@ -14,7 +14,7 @@ generation of Python extension written in C++.
 
 It is targeted to MTProto client library developers, detailed usage guide is available [here](https://pytgvoip.readthedocs.io/en/latest/guides/usage.html).
 
-An example of usage with [Pyrogram](https://github.com/Sanji78/stefano-pyrogram) is available [here](https://github.com/Sanji78/stefano-pytgvoip-pyrogram) ([`pytgvoip_pyrogram` in PyPI](https://pypi.org/project/pytgvoip_pyrogram/)), could be used as reference.
+An example of usage with [Pyrogram](https://github.com/Sanji78/stefano-pyrogram) is available [here](https://github.com/Sanji78/stefano-pytgvoip-pyrogram) ([`stefano-pytgvoip-pyrogram` in PyPI](https://pypi.org/project/stefano-pytgvoip-pyrogram/)), could be used as reference.
 
 ## Features
 * Python callbacks for sending and receiving audio stream frames allow flexible control
